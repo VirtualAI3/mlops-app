@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Captura y Detección</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+    <style>
+        body {
+            background-color: #f8f9fa;
+            padding: 1.5rem;
+            margin: 0;
+            font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        .camera-container {
+            position: relative;
+            width: 100%;
+            max-width: 640px;
+            margin: 0 auto 1.5rem auto;
+            border-radius: 12px;
+            overflow: hidden;
+            background: #000;
+            aspect-ratio: 4 / 3;
+        }
+
+        video,
+        img,
+        canvas {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+
+        #overlayLive {
+            position: absolute;
+            top: 0;
+            left: 0;
+            pointer-events: none;
+        }
+
+        .rating {
+            direction: rtl;
+            display: inline-flex;
+            gap: 5px;
+            justify-content: center;
+        }
+
+        .rating input {
+            display: none;
+        }
+
+        .rating label {
+            font-size: 2rem;
+            color: #ddd;
+            cursor: pointer;
+            transition: color 0.2s;
+            user-select: none;
+        }
+
+        .rating input:checked~label,
+        .rating label:hover,
+        .rating label:hover~label {
+            color: gold;
+        }
+
+        /* Responsive tweaks */
+        @media (max-width: 576px) {
+            body {
+                padding: 1rem;
+            }
+
+            .camera-container {
+                aspect-ratio: 3 / 4;
+                /* más vertical para móviles */
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h2 class="text-center mb-4">Sistema de Captura y Detección</h2>
+
+        <!-- Tabs -->
+        <div class="card shadow-sm">
+            <ul class="nav nav-tabs">
+                <li class="nav-item">
+                    <a class="nav-link active" id="captura-tab" data-bs-toggle="tab" href="#captura" role="tab"
+                        aria-controls="captura" aria-selected="true">Captura Única</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" id="en-vivo-tab" data-bs-toggle="tab" href="#en-vivo" role="tab"
+                        aria-controls="en-vivo" aria-selected="false">Detección en Vivo</a>
+                </li>
+            </ul>
+
+            <div class="tab-content p-3">
+                <!-- Captura Única -->
+                <div class="tab-pane fade show active" id="captura" role="tabpanel" aria-labelledby="captura-tab">
+                    <div class="camera-container">
+                        <video id="video" autoplay playsinline></video>
+                        <img id="preview" alt="Imagen capturada" style="display:none" />
+                        <canvas id="canvas" style="display:none"></canvas>
+                    </div>
+
+                    <div class="d-flex gap-2 flex-wrap">
+                        <button class="btn btn-primary flex-fill" id="btnCapturar">Capturar Imagen</button>
+                        <button class="btn btn-secondary flex-fill" id="btnSubir">Subir Imagen</button>
+                        <input type="file" id="inputImagen" accept="image/*" style="display:none" />
+                        <button class="btn btn-success flex-fill" id="btnDetectar">Detectar Enfermedad</button>
+                    </div>
+                </div>
+
+                <!-- Detección en Vivo -->
+                <div class="tab-pane fade" id="en-vivo" role="tabpanel" aria-labelledby="en-vivo-tab">
+                    <div class="camera-container" style="position:relative;">
+                        <video id="videoLive" autoplay playsinline></video>
+                        <canvas id="overlayLive"></canvas>
+                    </div>
+
+                    <div class="d-flex gap-2 flex-wrap mt-2">
+                        <button class="btn btn-success flex-fill" id="btnIniciar">Iniciar Detección en Vivo</button>
+                        <button class="btn btn-danger flex-fill" id="btnDetener" disabled>Detener</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Calificación -->
+        <div class="card mt-4 p-3 shadow-sm text-center">
+            <h5>Califica prediccion</h5>
+            <div class="rating" role="radiogroup" aria-label="Calificación de la experiencia">
+                <input type="radio" name="rating" id="star5" value="5" />
+                <label for="star5" title="5 Estrellas">★</label>
+                <input type="radio" name="rating" id="star4" value="4" />
+                <label for="star4" title="4 Estrellas">★</label>
+                <input type="radio" name="rating" id="star3" value="3" />
+                <label for="star3" title="3 Estrellas">★</label>
+                <input type="radio" name="rating" id="star2" value="2" />
+                <label for="star2" title="2 Estrellas">★</label>
+                <input type="radio" name="rating" id="star1" value="1" />
+                <label for="star1" title="1 Estrella">★</label>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        const video = document.getElementById("video");
+        const videoLive = document.getElementById("videoLive");
+        const preview = document.getElementById("preview");
+        const canvas = document.getElementById("canvas");
+        const btnCapturar = document.getElementById("btnCapturar");
+        const btnSubir = document.getElementById("btnSubir");
+        const inputImagen = document.getElementById("inputImagen");
+        const btnDetectar = document.getElementById("btnDetectar");
+        const btnIniciar = document.getElementById("btnIniciar");
+        const btnDetener = document.getElementById("btnDetener");
+        const overlayLive = document.getElementById("overlayLive");
+
+        let stream = null;
+        let liveInterval = null;
+
+        let deteccionesActuales = [];  // guardará detecciones del último predict
+        let puedeCalificar = false;     // bloqueo para evitar spam de ratings
+
+        // Obtener cámara trasera si existe, sino cámara por defecto
+        async function getRearCameraStream() {
+            try {
+                // Intenta pedir directamente la cámara trasera
+                const constraints = {
+                    video: {
+                        facingMode: { exact: "environment" }  // fuerza cámara trasera
+                    },
+                    audio: false
+                };
+
+                return await navigator.mediaDevices.getUserMedia(constraints);
+            } catch (error) {
+                console.warn("No se pudo acceder a la cámara trasera, usando cámara por defecto.", error);
+                // En caso de error, usa cámara por defecto
+                return await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+            }
+        }
+
+        // Inicializar cámara para ambos videos
+        async function inicializarCamara() {
+            try {
+                if (!stream) {
+                    stream = await getRearCameraStream();
+                    video.srcObject = stream;
+                    videoLive.srcObject = stream;
+                }
+            } catch (error) {
+                alert("No se pudo acceder a la cámara: " + error.message);
+            }
+        }
+
+        // Captura imagen (cambia entre mostrar video y preview)
+        btnCapturar.addEventListener("click", () => {
+            const ctx = canvas.getContext("2d");
+
+            if (btnCapturar.textContent === "Capturar Imagen") {
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                preview.src = canvas.toDataURL("image/jpeg");
+                preview.style.display = "block";
+                video.style.display = "none";
+                btnCapturar.textContent = "Capturar Otra Imagen";
+            } else {
+                preview.style.display = "none";
+                video.style.display = "block";
+                btnCapturar.textContent = "Capturar Imagen";
+            }
+        });
+
+        // Subir imagen desde archivo
+        btnSubir.addEventListener("click", () => inputImagen.click());
+
+        inputImagen.addEventListener("change", (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = () => {
+                preview.src = reader.result;
+                preview.style.display = "block";
+                video.style.display = "none";
+                btnCapturar.textContent = "Capturar Otra Imagen";
+            };
+            reader.readAsDataURL(file);
+        });
+
+        // Función para dibujar boxes en un canvas
+        function dibujarBoxes(ctx, boxes, img) {
+            // Ajustar tamaño canvas al tamaño imagen
+            ctx.canvas.width = img.width;
+            ctx.canvas.height = img.height;
+
+            // Dibujar la imagen primero
+            ctx.drawImage(img, 0, 0, img.width, img.height);
+
+            // Luego dibujar los boxes
+            boxes.forEach(b => {
+                ctx.strokeStyle = "lime";
+                ctx.lineWidth = 3;
+                ctx.strokeRect(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1);
+
+                ctx.fillStyle = "rgba(0, 255, 0, 0.5)";
+                ctx.font = "16px Arial";
+                const label = `${b.label || b.class || "obj"} (${(b.conf || b.confidence || 0).toFixed(2)})`;
+                ctx.fillText(label, b.x1 + 5, b.y1 - 5);
+            });
+        }
+
+        function dibujarBoxesOverlay(ctx, boxes) {
+            ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+
+            boxes.forEach(b => {
+                ctx.strokeStyle = "lime";
+                ctx.lineWidth = 3;
+                ctx.strokeRect(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1);
+
+                ctx.fillStyle = "rgba(0, 255, 0, 0.5)";
+                ctx.font = "16px Arial";
+                const label = `${b.label || b.class || "obj"} (${(b.conf || b.confidence || 0).toFixed(2)})`;
+                ctx.fillText(label, b.x1 + 5, b.y1 - 5);
+            });
+        }
+
+        async function detectarImagen(base64img, ctx) {
+            try {
+                const resp = await fetch("/predict", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ image: base64img }),
+                });
+                const data = await resp.json();
+
+                if (data.detections || data.boxes) {
+                    const boxes = data.detections || data.boxes || [];
+
+                    // Guardar detecciones actuales para rating
+                    deteccionesActuales = boxes;
+                    puedeCalificar = true;
+
+                    // Crea imagen para pasar a dibujarBoxes
+                    const img = new Image();
+                    img.src = base64img;
+                    await img.decode();
+
+                    // Dibuja imagen + cajas en canvas
+                    dibujarBoxes(ctx, boxes, img);
+                } else if (data.error) {
+                    alert("Error en predicción: " + data.error);
+                    deteccionesActuales = [];
+                    puedeCalificar = false;
+                } else {
+                    alert("Respuesta inesperada del servidor");
+                    deteccionesActuales = [];
+                    puedeCalificar = false;
+                }
+            } catch (err) {
+                console.error(err);
+                alert("Error al comunicarse con el servidor");
+                deteccionesActuales = [];
+                puedeCalificar = false;
+            }
+        }
+
+
+        // Botón detectar (captura o subida)
+        btnDetectar.addEventListener("click", async () => {
+            const ctx = canvas.getContext("2d");
+            let base64img = null;
+
+            if (preview.style.display === "block") {
+                // Imagen subida o capturada
+                const img = new Image();
+                img.src = preview.src;
+                await img.decode();
+                canvas.width = img.width;
+                canvas.height = img.height;
+                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                base64img = canvas.toDataURL("image/jpeg");
+            } else {
+                // Imagen en vivo desde video
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                base64img = canvas.toDataURL("image/jpeg");
+            }
+
+            preview.style.display = "none";
+            canvas.style.display = "block";
+
+            await detectarImagen(base64img, ctx);
+        });
+
+        // Detección en vivo: iniciar
+        btnIniciar.addEventListener("click", async () => {
+            await inicializarCamara();
+            btnIniciar.disabled = true;
+            btnDetener.disabled = false;
+
+            const ctxOverlay = overlayLive.getContext("2d");
+
+            liveInterval = setInterval(async () => {
+                if (videoLive.readyState < 2) return;
+
+                // Canvas temporal para capturar frame
+                const liveCanvas = document.createElement("canvas");
+                liveCanvas.width = videoLive.videoWidth;
+                liveCanvas.height = videoLive.videoHeight;
+                const liveCtx = liveCanvas.getContext("2d");
+                liveCtx.drawImage(videoLive, 0, 0, liveCanvas.width, liveCanvas.height);
+                const base64img = liveCanvas.toDataURL("image/jpeg");
+
+                try {
+                    const resp = await fetch("/predict", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ image: base64img }),
+                    });
+                    const data = await resp.json();
+
+                    if (data.detections || data.boxes) {
+                        const boxes = data.detections || data.boxes || [];
+
+                        deteccionesActuales = boxes;  // actualizar detecciones para rating
+                        puedeCalificar = true;        // permitir calificación
+
+                        // Ajustar tamaño overlay
+                        overlayLive.width = videoLive.videoWidth;
+                        overlayLive.height = videoLive.videoHeight;
+
+                        dibujarBoxesOverlay(ctxOverlay, boxes);
+                    }
+                } catch (err) {
+                    console.error("Error en detección en vivo:", err);
+                }
+            }, 2000);
+
+        });
+
+        // Detección en vivo: detener
+        btnDetener.addEventListener("click", () => {
+            clearInterval(liveInterval);
+            btnIniciar.disabled = false;
+            btnDetener.disabled = true;
+
+            if (overlayLive.getContext) {
+                const ctxOverlay = overlayLive.getContext("2d");
+                ctxOverlay.clearRect(0, 0, overlayLive.width, overlayLive.height);
+            }
+        });
+
+        // Calificación
+        document.querySelectorAll(".rating input").forEach((star) => {
+            star.addEventListener("change", async (e) => {
+                if (!puedeCalificar) {
+                    alert("Por favor, realiza primero una detección antes de calificar.");
+                    // Deseleccionar la estrella
+                    e.target.checked = false;
+                    return;
+                }
+
+                const stars = parseInt(e.target.value);
+
+                // Datos para enviar
+                const payload = {
+                    stars: stars,
+                    detections: deteccionesActuales,
+                    image_source: (preview.style.display === "block" ? "video_live" : "captura")
+                };
+
+                try {
+                    const resp = await fetch("/save_rating", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(payload)
+                    });
+                    const data = await resp.json();
+
+                    if (resp.ok) {
+                        alert(`Gracias por calificar con ${stars} estrellas ⭐`);
+                        puedeCalificar = false;  // bloquear rating hasta nueva predicción
+                        // Opcional: resetear selección
+                        document.querySelectorAll(".rating input").forEach(i => i.checked = false);
+                    } else {
+                        alert("Error al guardar la calificación: " + (data.error || "Error desconocido"));
+                        // Mantener puedeCalificar para intentar otra vez
+                    }
+                } catch (error) {
+                    alert("Error al enviar la calificación: " + error.message);
+                }
+            });
+        });
+
+
+        // Inicializar cámara al cargar página
+        inicializarCamara();
+    </script>
+</body>
+
+</html>
