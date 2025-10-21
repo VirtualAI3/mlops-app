@@ -4,6 +4,3 @@ from train import run_train as Reentrenar
 if __name__ == "__main__":
     GenerarDataset()
     Reentrenar()
-
-
-
