@@ -64,7 +64,7 @@ def verificar_condicion_reentrenamiento():
 
         if filtrados >= 2:
             print("🔁 Ejecutando retrain.py...")
-            subprocess.run(["python", "retrain.py"], check=True)
+            subprocess.run(["python", "scripts/retrain.py"], check=True)
             conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
             cursor.execute(
